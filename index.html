@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>仿微信·AI聊天（完整修正版）</title>
+<style>
+  :root{
+    --wx-green:#07c160; --bg:#f5f5f7; --card:#fff; --text:#111; --muted:#888;
+    --bubble-me:#b2f27a; --bubble-ai:#ffffff; --line:#eaeaea;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Helvetica,Arial;background:var(--bg);color:var(--text)}
+  header.appbar{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--card);border-bottom:1px solid var(--line)}
+  header .title{font-weight:600}
+  header .iconbtn{background:#f6f6f6;border:1px solid var(--line);padding:6px 10px;border-radius:10px}
+  .page{display:none;min-height:calc(100vh - 56px);padding:10px}
+  .page.active{display:block}
+  nav.tabbar{position:fixed;bottom:0;left:0;right:0;height:56px;background:var(--card);border-top:1px solid var(--line);display:flex}
+  nav.tabbar button{flex:1;border:none;background:none;font-size:13px}
+  nav.tabbar button.active{color:var(--wx-green);font-weight:600}
+  .list{background:var(--card);border-radius:12px;overflow:hidden}
+  .item{display:flex;gap:12px;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+  .item:last-child{border-bottom:none}
+  .avatar{width:44px;height:44px;border-radius:8px;background:#eee;object-fit:cover}
+  .muted{color:var(--muted);font-size:12px}
+  .btn{background:var(--wx-green);color:#fff;border:none;border-radius:10px;padding:8px 12px}
+  .btn.ghost{background:#f6f6f6;color:#333;border:1px solid var(--line)}
+  .row{display:flex;gap:8px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  /* Chat */
+  .chat-wrap{display:flex;flex-direction:column;height:calc(100vh - 56px)}
+  .chat-list{flex:1;overflow:auto;padding:10px}
+  .bubble{max-width:78%;padding:8px 10px;border-radius:10px;box-shadow:0 1px 0 rgba(0,0,0,.04)}
+  .me{display:flex;justify-content:flex-end;margin:8px 0}
+  .me .bubble{background:var(--bubble-me)}
+  .ai{display:flex;justify-content:flex-start;margin:8px 0}
+  .ai .bubble{background:var(--bubble-ai);border:1px solid var(--line)}
+  .time{display:block;text-align:center;color:#999;font-size:12px;margin:8px 0}
+  .chat-inputbar{border-top:1px solid var(--line);padding:8px;background:var(--card)}
+  .chat-inputbar .tools{display:flex;align-items:center;gap:8px}
+  .emo-panel,.plus-panel{margin-top:6px;border-top:1px dashed var(--line);padding-top:8px}
+  input[type=text],input[type=number],select,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff}
+  textarea{min-height:100px}
+  .pill{padding:6px 10px;border:1px solid var(--line);background:#fafafa;border-radius:999px;font-size:12px}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:flex-end;z-index:20}
+  .modal.show{display:flex}
+  .sheet{width:100%;max-height:88vh;overflow:auto;background:var(--card);border-radius:16px 16px 0 0;padding:12px 12px 16px}
+  .sheet h3{margin:6px 0 12px 0}
+  .section{background:#fafafa;border:1px solid var(--line);border-radius:12px;padding:10px;margin:10px 0}
+  .actions{display:flex;gap:10px;position:sticky;bottom:0;background:transparent;margin-top:10px}
+  .moment{background:var(--card);border-radius:12px;padding:10px;margin:10px 0;border:1px solid var(--line)}
+  .small{font-size:12px;color:var(--muted)}
+  /* responsive small */
+  @media (min-width:600px){ .sheet{max-width:600px;margin:0 auto;border-radius:12px} }
+</style>
+</head>
+<body>
+
+<header class="appbar">
+  <div class="title" id="app-title">消息</div>
+  <button id="top-plus" class="iconbtn" title="新建角色">＋</button>
+</header>
+
+<main id="page-chatlist" class="page active">
+  <div id="chatlist" class="list"></div>
+</main>
+
+<main id="page-contacts" class="page">
+  <div class="section">
+    <div class="row" style="justify-content:space-between;align-items:center;margin:6px 0 10px">
+      <div class="muted">好友分组</div>
+      <button class="pill" onclick="openManageGroups()">管理分组</button>
+    </div>
+    <div id="contact-groups" class="list"></div>
+  </div>
+</main>
+
+<main id="page-moments" class="page">
+  <div class="section">
+    <label>文字</label>
+    <textarea id="moment-text" placeholder="写点什么..."></textarea>
+    <label style="margin-top:8px">图片 URL（可选）</label>
+    <input id="moment-img" placeholder="https://...jpg/png" />
+    <label style="margin-top:8px">图片描述（可选）</label>
+    <input id="moment-img-desc" placeholder="图说：在海边..." />
+    <div class="row" style="margin-top:8px">
+      <button class="btn" onclick="postMoment()">发布</button>
+      <button class="btn ghost" onclick="clearMoments()">清空</button>
+    </div>
+  </div>
+  <div id="moments-list"></div>
+</main>
+
+<main id="page-me" class="page">
+  <div class="section">
+    <h3>API 设置</h3>
+    <label>Base URL</label>
+    <input id="api-base" placeholder="如：https://api.openai.com/v1" />
+    <label>API Key</label>
+    <input id="api-key" placeholder="sk-..." />
+    <label>Model</label>
+    <input id="api-model" placeholder="gpt-5" value="gpt-5"/>
+    <div class="row" style="margin-top:8px">
+      <button class="btn" onclick="saveApi()">保存</button>
+      <button class="btn ghost" onclick="testApi()">测试</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>世界书（WorldBook）</h3>
+    <label>标题</label><input id="wb-title" placeholder="世界书标题（必填）"/>
+    <label style="margin-top:8px">内容</label><textarea id="wb-content" placeholder="世界设定、历史、偏好等..."></textarea>
+    <div class="row" style="margin-top:8px">
+      <button class="btn" onclick="addWorld()">添加</button>
+    </div>
+    <div id="worldbook-list" style="margin-top:12px"></div>
+  </div>
+</main>
+
+<main id="page-chat" class="page"></main>
+
+<nav class="tabbar">
+  <button class="active" onclick="switchTab('chatlist')">消息</button>
+  <button onclick="switchTab('contacts')">通讯录</button>
+  <button onclick="switchTab('moments')">朋友圈</button>
+  <button onclick="switchTab('me')">我的</button>
+</nav>
+
+<section id="modal-newrole" class="modal" onclick="maskClose(event,'modal-newrole')">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <h3>创建新角色</h3>
+    <div class="section">
+      <label>备注名 / 群名</label>
+      <input id="nr-remark" placeholder="例如：小李、产品群..." />
+      <label style="margin-top:8px">好友分组</label>
+      <div class="row" style="margin-top:6px">
+        <select id="nr-group" style="flex:1"></select>
+        <button class="pill" onclick="openManageGroups()">管理分组</button>
+      </div>
+      <label style="margin-top:8px">关联世界书（多选）</label>
+      <div id="nr-worldbooks" class="row" style="flex-wrap:wrap;margin-top:6px"></div>
+      <label style="margin-top:8px">对方人设 (AI Persona)</label>
+      <textarea id="nr-ai-persona" placeholder="写Ta的性格、身份、说话方式..."></textarea>
+      <label style="margin-top:8px">对方头像 URL</label>
+      <input id="nr-avatar" placeholder="https://...png/jpg" />
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+        <img id="nr-avatar-preview" class="avatar" alt="">
+      </div>
+    </div>
+
+    <div class="section">
+      <label>我的人设 (My Persona)</label>
+      <textarea id="nr-my-persona" placeholder="让AI知道你是谁、你的口吻..."></textarea>
+      <label style="margin-top:8px">我的头像 URL</label>
+      <input id="nr-my-avatar" placeholder="我的头像URL"/>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+        <img id="nr-my-avatar-preview" class="avatar" alt="">
+      </div>
+      <label style="margin-top:8px">上下文记忆条数</label>
+      <input id="nr-memory" type="number" min="4" max="50" value="12"/>
+    </div>
+
+    <div class="actions">
+      <button class="btn ghost" onclick="closeModal('modal-newrole')">取消</button>
+      <button class="btn" onclick="confirmNewRole()">确定</button>
+    </div>
+  </div>
+</section>
+
+<section id="modal-role-settings" class="modal" onclick="maskClose(event,'modal-role-settings')">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <h3>聊天设置</h3>
+    <div class="section">
+      <label>备注名 / 群名</label><input id="rs-remark"/>
+      <label style="margin-top:8px">好友分组</label>
+      <div class="row" style="margin-top:6px"><select id="rs-group" style="flex:1"></select><button class="pill" onclick="openManageGroups()">管理分组</button></div>
+      <label style="margin-top:8px">关联世界书（多选）</label>
+      <div id="rs-worldbooks" class="row" style="flex-wrap:wrap;margin-top:6px"></div>
+      <label style="margin-top:8px">对方人设 (AI Persona)</label><textarea id="rs-ai-persona"></textarea>
+      <label style="margin-top:8px">对方头像 URL</label><input id="rs-avatar" placeholder="头像URL"/>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+        <img id="rs-avatar-preview" class="avatar" alt="">
+      </div>
+    </div>
+    <div class="section">
+      <label>我的人设 (My Persona)</label><textarea id="rs-my-persona"></textarea>
+      <label style="margin-top:8px">我的头像 URL</label><input id="rs-my-avatar" placeholder="我的头像URL"/>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+        <img id="rs-my-avatar-preview" class="avatar" alt="">
+      </div>
+      <label style="margin-top:8px">上下文记忆条数</label><input id="rs-memory" type="number" min="4" max="50"/>
+    </div>
+    <div class="actions">
+      <button class="btn ghost" onclick="closeModal('modal-role-settings')">取消</button>
+      <button class="btn" onclick="saveRoleSettings()">保存</button>
+    </div>
+  </div>
+</section>
+
+<section id="modal-groups" class="modal" onclick="maskClose(event,'modal-groups')">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <h3>管理分组</h3>
+    <div id="group-list" class="list"></div>
+    <div class="row" style="margin-top:10px">
+      <input id="new-group-name" placeholder="新增分组名"/>
+      <button class="btn" onclick="addGroup()">添加</button>
+    </div>
+    <div class="actions">
+      <button class="btn" style="flex:1" onclick="closeModal('modal-groups')">完成</button>
+    </div>
+  </div>
+</section>
+
+<script>
+/* ---------- state & storage ---------- */
+const SKEY='wxai_v3';
+let state = JSON.parse(localStorage.getItem(SKEY) || 'null') || {
+  api:{base:'',key:'',model:'gpt-5'},
+  groups:['未分组'],
+  worldbooks:[], // {id,title,content}
+  roles:[],     // {id,remark,group,worlds[],aiPersona,myPersona,avatar,myAvatar,memory,chats:[]}
+  moments:[]    // {id,text,img,imgDesc,time}
+};
+function save(){ localStorage.setItem(SKEY, JSON.stringify(state)); }
+
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const uid =()=> 'id'+Math.random().toString(36).slice(2,9);
+const timeStr = t => new Date(t).toLocaleString();
+function el(tag, attrs={}, ...kids){
+  const n = document.createElement(tag);
+  for(const k in attrs){ if(k==='class') n.className=attrs[k]; else if(k==='html') n.innerHTML=attrs[k]; else n.setAttribute(k, attrs[k]); }
+  kids.flat().filter(Boolean).forEach(c=> n.appendChild(typeof c==='string'?document.createTextNode(c):c));
+  return n;
+}
+function openModal(id){ $('#'+id).classList.add('show'); }
+function closeModal(id){ $('#'+id).classList.remove('show'); }
+function maskClose(e,id){ if(e.target.id===id) closeModal(id); }
+
+/* ---------- UI switching ---------- */
+let currentTab='chatlist';
+let currentRoleId=null;
+function switchTab(tab){
+  currentTab = tab;
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  $('#app-title').textContent = tab==='chatlist'?'消息':tab==='contacts'?'通讯录':tab==='moments'?'朋友圈':tab==='me'?'我的':'聊天';
+  const buttons = document.querySelectorAll('nav.tabbar button');
+  buttons.forEach(b=>b.classList.remove('active'));
+  const idxMap = {chatlist:0,contacts:1,moments:2,me:3};
+  if(idxMap[tab]!==undefined) buttons[idxMap[tab]].classList.add('active');
+  $('#top-plus').style.display = (tab==='chatlist') ? 'inline-block' : 'none';
+  if(tab==='chatlist'){ renderChatList(); $('#page-chatlist').classList.add('active'); }
+  if(tab==='contacts'){ renderContacts(); $('#page-contacts').classList.add('active'); }
+  if(tab==='moments'){ renderMoments(); $('#page-moments').classList.add('active'); }
+  if(tab==='me'){ renderMe(); $('#page-me').classList.add('active'); }
+}
+$('#top-plus').addEventListener('click', ()=> openNewRoleSheet());
+
+/* ---------- worldbook ---------- */
+function addWorld(){
+  const t = $('#wb-title').value.trim(), c = $('#wb-content').value.trim();
+  if(!t || !c){ alert('请填写标题和内容'); return; }
+  state.worldbooks.unshift({id:uid(), title:t, content:c});
+  $('#wb-title').value=''; $('#wb-content').value='';
+  save(); renderMe();
+}
+function removeWorld(id){
+  state.worldbooks = state.worldbooks.filter(w=>w.id!==id); save(); renderMe();
+}
+
+/* ---------- groups ---------- */
+function openManageGroups(){
+  const box = $('#group-list'); box.innerHTML='';
+  state.groups.forEach((g,idx)=>{
+    const row = el('div',{class:'item'}, [
+      el('div',{}, g),
+      el('div',{style:'margin-left:auto'}, idx===0? el('span',{class:'small'},'默认') : el('button',{class:'pill',onclick:()=>{ if(confirm('删除分组？此操作不会删除联系人，仅会将其归入未分组')){ state.groups.splice(idx,1); save(); openManageGroups(); renderContacts(); } }},'删除') )
+    ]);
+    box.appendChild(row);
+  });
+  openModal('modal-groups');
+}
+function addGroup(){
+  const v = $('#new-group-name').value.trim(); if(!v) return;
+  if(!state.groups.includes(v)) state.groups.push(v);
+  $('#new-group-name').value=''; save(); openManageGroups(); renderContacts();
+}
+
+/* ---------- chat list & contacts ---------- */
+function renderChatList(){
+  const wrap = $('#chatlist'); wrap.innerHTML='';
+  if(state.roles.length===0){
+    wrap.appendChild(el('div',{class:'item'}, [
+      el('img',{class:'avatar'}),
+      el('div',{}, [ el('div',{},'暂无联系人'), el('div',{class:'muted'}, '点击右上角＋创建角色') ])
+    ]));
+    return;
+  }
+  state.roles.forEach(r=>{
+    const last = r.chats[r.chats.length-1];
+    const preview = last ? (last.type==='text'? last.text : last.type==='image'?'[图片]': last.type==='voice'?'[语音]': last.type==='transfer'?'[转账]':'') : '点击开始聊天';
+    const it = el('div',{class:'item'}, [
+      el('img',{class:'avatar',src:r.avatar||''}),
+      el('div',{}, [ el('div',{}, r.remark), el('div',{class:'muted'}, preview) ]),
+      el('div',{style:'margin-left:auto',class:'muted'}, last ? new Date(last.time).toLocaleTimeString().slice(0,5) : '' )
+    ]);
+    it.addEventListener('click', ()=> openChat(r.id));
+    wrap.appendChild(it);
+  });
+}
+function renderContacts(){
+  const wrap = $('#contact-groups'); wrap.innerHTML='';
+  state.groups.forEach(g=>{
+    const sec = el('div',{class:'section'}, [ el('div',{class:'muted'}, g) ]);
+    const list = el('div',{class:'list'});
+    state.roles.filter(r=>r.group===g).forEach(r=>{
+      const it = el('div',{class:'item'}, [
+        el('img',{class:'avatar',src:r.avatar||''}),
+        el('div',{}, [ el('div',{}, r.remark), el('div',{class:'muted'}, r.aiPersona? r.aiPersona.slice(0,40):'无人设') ])
+      ]);
+      it.addEventListener('click', ()=> openChat(r.id));
+      list.appendChild(it);
+    });
+    sec.appendChild(list);
+    wrap.appendChild(sec);
+  });
+}
+
+/* ---------- moments ---------- */
+function postMoment(){
+  const text = $('#moment-text').value.trim();
+  const img = $('#moment-img').value.trim();
+  const imgDesc = $('#moment-img-desc').value.trim();
+  if(!text && !img){ alert('请输入文字或图片'); return; }
+  state.moments.unshift({id:uid(), text, img, imgDesc, time: Date.now()});
+  $('#moment-text').value=''; $('#moment-img').value=''; $('#moment-img-desc').value='';
+  save(); renderMoments();
+}
+function clearMoments(){ if(confirm('清空朋友圈？')){ state.moments=[]; save(); renderMoments(); } }
+function renderMoments(){
+  const wrap = $('#moments-list'); wrap.innerHTML='';
+  if(state.moments.length===0) { wrap.appendChild(el('div',{class:'muted'}, '还没有动态')); return; }
+  state.moments.forEach(m=>{
+    const node = el('div',{class:'moment'}, [
+      el('div',{}, m.text),
+      m.img ? el('div',{}, [ el('img',{src:m.img, style:'max-width:100%;border-radius:8px;margin-top:8px'}), el('div',{class:'small muted'}, m.imgDesc||'') ]) : '',
+      el('div',{class:'small muted'}, timeStr(m.time))
+    ]);
+    wrap.appendChild(node);
+  });
+}
+
+/* ---------- my (api, worldbook rendering) ---------- */
+function saveApi(){
+  state.api.base = $('#api-base').value.trim();
+  state.api.key  = $('#api-key').value.trim();
+  state.api.model= $('#api-model').value.trim() || 'gpt-5';
+  save(); alert('已保存 API 设置');
+}
+async function testApi(){
+  if(!state.api.base || !state.api.key){ alert('请先填写 BaseURL 与 Key'); return;}
+  try{
+    const res = await fetch(state.api.base + '/models', { headers:{ Authorization:'Bearer '+state.api.key } });
+    alert(res.ok? 'API 可用' : 'API 请求失败（注意 CORS 与 URL）');
+  }catch(e){ alert('请求失败：'+e.message); }
+}
+function renderMe(){
+  $('#api-base').value = state.api.base || '';
+  $('#api-key').value = state.api.key || '';
+  $('#api-model').value = state.api.model || 'gpt-5';
+  const wb = $('#worldbook-list'); wb.innerHTML='';
+  if(state.worldbooks.length===0) wb.appendChild(el('div',{class:'muted'},'暂无世界书'));
+  state.worldbooks.forEach(w=>{
+    const node = el('div',{class:'item'}, [
+      el('div',{}, el('div',{}, w.title), el('div',{class:'muted'}, w.content.slice(0,80) + (w.content.length>80?'...':''))),
+      el('div',{style:'margin-left:auto'}, el('button',{class:'pill',onclick:()=>{ if(confirm('删除世界书？')){ removeWorld(w.id); } }},'删除'))
+    ]);
+    wb.appendChild(node);
+  });
+}
+
+/* ---------- create role ---------- */
+function openNewRoleSheet(){
+  // fill groups and worldbooks
+  const gsel = $('#nr-group'); gsel.innerHTML='';
+  state.groups.forEach(g=> gsel.appendChild(el('option',{value:g}, g)));
+  const wrap = $('#nr-worldbooks'); wrap.innerHTML='';
+  state.worldbooks.forEach(w=> wrap.appendChild(el('label',{class:'pill'}, [ el('input',{type:'checkbox',value:w.id, style:'margin-right:6px'}), w.title ]) ));
+  $('#nr-avatar').value=''; $('#nr-avatar-preview').src='';
+  $('#nr-my-avatar').value=''; $('#nr-my-avatar-preview').src='';
+  $('#nr-remark').value=''; $('#nr-ai-persona').value=''; $('#nr-my-persona').value=''; $('#nr-memory').value=12;
+  openModal('modal-newrole');
+}
+function confirmNewRole(){
+  const remark = $('#nr-remark').value.trim() || '未命名';
+  const group = $('#nr-group').value || state.groups[0];
+  const worlds = [...document.querySelectorAll('#nr-worldbooks input:checked')].map(i=>i.value);
+  const aiPersona = $('#nr-ai-persona').value.trim();
+  const myPersona = $('#nr-my-persona').value.trim();
+  const avatar = $('#nr-avatar').value.trim();
+  const myAvatar = $('#nr-my-avatar').value.trim();
+  const memory = Math.max(4, Math.min(50, parseInt($('#nr-memory').value||12)));
+  const r = { id:uid(), remark, group, worlds, aiPersona, myPersona, avatar, myAvatar, memory, chats:[] };
+  state.roles.unshift(r); save(); closeModal('modal-newrole'); switchTab('chatlist'); renderChatList();
+}
+/* preview avatar in modal */
+$('#nr-avatar').addEventListener('input', e=> $('#nr-avatar-preview').src = e.target.value );
+$('#nr-my-avatar').addEventListener('input', e=> $('#nr-my-avatar-preview').src = e.target.value );
+
+/* ---------- open chat ---------- */
+function openChat(roleId){
+  currentRoleId = roleId;
+  const role = state.roles.find(r=>r.id===roleId); if(!role) return;
+  $('#app-title').textContent = role.remark;
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  $('#page-chat').classList.add('active');
+  renderChat(roleId);
+}
+
+/* render chat UI for role */
+function renderChat(roleId){
+  const role = state.roles.find(r=>r.id===roleId);
+  const page = $('#page-chat'); page.innerHTML='';
+  const wrap = el('div',{class:'chat-wrap'});
+  // top quick
+  wrap.appendChild(el('div',{class:'row',style:'padding:8px 10px;gap:8px;background:#fff;border-bottom:1px solid var(--line)'}, [
+    el('button',{class:'pill',onclick:()=>openRoleSettings(roleId)}, '设置'),
+    el('div',{class:'muted'}, `对方人设：${role.aiPersona? role.aiPersona.slice(0,40):'无'} · 记忆 ${role.memory||12}`)
+  ]));
+  // chat list
+  const list = el('div',{class:'chat-list',id:'chat-list'});
+  role.chats.forEach(c=> list.appendChild(renderBubble(c)));
+  wrap.appendChild(list);
+  // input bar
+  const bar = el('div',{class:'chat-inputbar'});
+  const tools = el('div',{class:'tools'});
+  const emoBtn = el('button',{class:'pill',id:'btn-emo'}, '表情包');
+  const inputBox = el('input',{id:'chat-input',placeholder:'输入消息...'});
+  const sendBtn = el('button',{class:'pill'}, '发送');
+  const recvBtn = el('button',{class:'pill'}, '接收');
+  const plusBtn = el('button',{class:'pill'}, '+');
+  tools.append(emoBtn, inputBox, sendBtn, recvBtn, plusBtn);
+  bar.appendChild(tools);
+
+  // emo panel
+  const emoPanel = el('div',{class:'emo-panel',id:'emo-panel',style:'display:none'}, [
+    el('div',{}, '插入图片 URL + 名称（给 AI 识别）：'),
+    el('input',{id:'emo-url',placeholder:'https://...png'}),
+    el('input',{id:'emo-name',placeholder:'贴图名称，例如：笑哭'}),
+    el('div',{class:'row',style:'margin-top:6px'}, [ el('button',{class:'btn'}, '发送贴图'), el('button',{class:'btn ghost'}, '收起') ])
+  ]);
+  // plus panel
+  const plusPanel = el('div',{class:'plus-panel',id:'plus-panel',style:'display:none'}, [
+    el('div',{class:'grid3'}, [
+      el('button',{class:'pill'}, '📷 照相机'),
+      el('button',{class:'pill'}, '🎤 语音'),
+      el('button',{class:'pill'}, '¥ 转账')
+    ])
+  ]);
+  bar.appendChild(emoPanel); bar.appendChild(plusPanel);
+  wrap.appendChild(bar);
+  page.appendChild(wrap);
+
+  // wire events (closures to keep roleId)
+  emoBtn.addEventListener('click', ()=> emoPanel.style.display = emoPanel.style.display==='none'?'block':'none');
+  plusBtn.addEventListener('click', ()=> plusPanel.style.display = plusPanel.style.display==='none'?'block':'none');
+
+  sendBtn.addEventListener('click', ()=> {
+    const v = inputBox.value.trim(); if(!v) return;
+    pushChat(roleId, {role:'user', type:'text', text:v});
+    inputBox.value='';
+  });
+  // emo send
+  emoPanel.querySelector('.btn').addEventListener('click', ()=> {
+    const url = emoPanel.querySelector('#emo-url').value.trim();
+    const name = emoPanel.querySelector('#emo-name').value.trim() || '贴图';
+    if(!url){ alert('请输入图片 URL'); return; }
+    pushChat(roleId, {role:'user', type:'image', text:`[贴图] ${name}`, meta:{url, name}});
+    emoPanel.querySelector('#emo-url').value=''; emoPanel.querySelector('#emo-name').value='';
+  });
+  emoPanel.querySelector('.btn.ghost').addEventListener('click', ()=> emoPanel.style.display='none');
+
+  // plus panel items
+  const plusBtns = plusPanel.querySelectorAll('button');
+  plusBtns[0].addEventListener('click', ()=> { // camera
+    const desc = prompt('添加图片描述（将作为消息发送）');
+    if(desc===null) return;
+    pushChat(roleId, {role:'user', type:'image', text:desc, meta:{name:'相机图片', url:''}});
+  });
+  plusBtns[1].addEventListener('click', ()=> { // voice
+    const desc = prompt('添加语音描述（虚拟发送）');
+    if(desc===null) return;
+    pushChat(roleId, {role:'user', type:'voice', text:'[语音]', meta:{desc}});
+  });
+  plusBtns[2].addEventListener('click', ()=> { // transfer
+    const amt = prompt('输入金额（元）');
+    if(amt===null) return;
+    const note = prompt('备注（可空）')||'';
+    pushChat(roleId, {role:'user', type:'transfer', text:'[转账]', meta:{amount: Number(amt)||0, note}});
+  });
+
+  // receive: call API or simulate
+  recvBtn.addEventListener('click', ()=> receiveAI(roleId));
+
+  list.scrollTop = list.scrollHeight;
+}
+
+/* bubble renderer */
+function renderBubble(c){
+  const sideClass = c.role==='user' ? 'me' : 'ai';
+  const row = el('div',{class:sideClass});
+  const b = el('div',{class:'bubble'});
+  if(c.type==='text') b.textContent = c.text;
+  else if(c.type==='image'){
+    b.innerHTML = `<div style="font-size:12px;color:#666">${c.meta?.name||'图片'}</div>
+                   ${c.meta?.url? `<img src="${c.meta.url}" style="max-width:180px;border-radius:8px;border:1px solid var(--line)" onerror="this.style.display='none'"/>` : ''}
+                   <div style="margin-top:6px">${c.text||''}</div>`;
+  }else if(c.type==='voice'){
+    b.innerHTML = `<div>🎤 语音：${c.meta?.desc||''}</div>`;
+  }else if(c.type==='transfer'){
+    b.innerHTML = `<div>¥ 转账：${c.meta?.amount||0} 元</div><div class="muted">${c.meta?.note||''}</div>`;
+  }else{
+    b.textContent = c.text;
+  }
+  row.appendChild(b);
+  return row;
+}
+
+/* push chat and update display */
+function pushChat(roleId, obj){
+  const r = state.roles.find(x=>x.id===roleId); if(!r) return;
+  r.chats.push({...obj, time: Date.now()});
+  save();
+  const list = $('#chat-list');
+  if(list) list.appendChild(renderBubble({...obj, time: Date.now()}));
+  // refresh preview
+  renderChatList();
+  // scroll
+  setTimeout(()=>{ if(list) list.scrollTop = list.scrollHeight; },80);
+}
+
+/* ---------- receive AI (uses API if configured, else simulate) ---------- */
+async function receiveAI(roleId){
+  const r = state.roles.find(x=>x.id===roleId); if(!r) return;
+  // append a loading bubble
+  const loading = {role:'assistant', type:'text', text:'对方正在输入…', time: Date.now()};
+  pushChat(roleId, loading);
+
+  // prepare system prompt and message history
+  const sysParts = [
+    '你是一位真实的人类朋友，正在通过微信私聊。不要暴露自己是 AI。',
+    '回答要自然、有温度，每次回复 4 到 6 句话。',
+  ];
+  if(r.aiPersona) sysParts.push('对方（你）的角色人设：' + r.aiPersona);
+  if(r.worlds && r.worlds.length){
+    const wbContents = r.worlds.map(wid => {
+      const w = state.worldbooks.find(x=>x.id===wid);
+      return w ? `${w.title}: ${w.content}` : '';
+    }).filter(Boolean).join('\n');
+    if(wbContents) sysParts.push('世界书设定：' + wbContents);
+  }
+  if(r.myPersona) sysParts.push('我（用户）的人设：' + r.myPersona);
+  const systemPrompt = sysParts.join('\n');
+
+  // prepare messages from last N
+  const recent = r.chats.slice(-Math.max(4, r.memory||12)).map(c=>{
+    if(c.type==='text') return {role: c.role==='user' ? 'user':'assistant', content: c.text};
+    if(c.type==='image') return {role: c.role==='user' ? 'user':'assistant', content: `[图片] ${c.meta?.name||''} ${c.text||''} ${c.meta?.url||''}`};
+    if(c.type==='voice') return {role: c.role==='user' ? 'user':'assistant', content: `[语音] ${c.meta?.desc||''}`};
+    if(c.type==='transfer') return {role: c.role==='user' ? 'user':'assistant', content: `[转账] 金额:${c.meta?.amount||0} 备注:${c.meta?.note||''}`};
+    return {role: c.role==='user' ? 'user':'assistant', content: c.text||''};
+  });
+
+  // call API if configured
+  let aiText = '';
+  if(state.api.base && state.api.key && state.api.model){
+    try{
+      const body = { model: state.api.model, messages: [{role:'system', content: systemPrompt}, ...recent] };
+      const res = await fetch(state.api.base + '/chat/completions', {
+        method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+state.api.key }, body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      aiText = data?.choices?.[0]?.message?.content || ('（API 无返回）');
+    }catch(e){
+      aiText = '请求 API 失败：' + e.message;
+    }
+  }else{
+    // 模拟回复：简单结合 persona & worldbook
+    aiText = `${r.aiPersona?('作为：'+r.aiPersona+'，') : ''}我收到了你的消息，${Math.random()<0.5?'我也有同感。':'我会认真回复你的。'}（模拟回复）`;
+    // ensure 4-6 short sentences: if only one, split
+    if(aiText.split('。').length<4) aiText += ' 我觉得这样。 也许可以试试这个。 希望有帮助。';
+  }
+
+  // remove the loading bubble (last assistant)
+  r.chats = r.chats.filter((c,i)=> !(c.role==='assistant' && c.text==='对方正在输入…' && i===r.chats.length-1));
+  // push real reply
+  pushChat(roleId, {role:'assistant', type:'text', text: aiText});
+}
+
+/* ---------- role settings ---------- */
+function openRoleSettings(roleId){
+  const r = state.roles.find(x=>x.id===roleId); if(!r) return;
+  $('#rs-remark').value = r.remark || '';
+  // groups
+  const sel = $('#rs-group'); sel.innerHTML='';
+  state.groups.forEach(g=> sel.appendChild(el('option',{value:g}, g)));
+  sel.value = r.group || state.groups[0];
+  // worldbooks
+  const wrap = $('#rs-worldbooks'); wrap.innerHTML='';
+  state.worldbooks.forEach(w=> {
+    const chk = el('input',{type:'checkbox',value:w.id, style:'margin-right:6px'}); chk.checked = (r.worlds||[]).includes(w.id);
+    const lb = el('label',{class:'pill'}, [ chk, w.title ] );
+    wrap.appendChild(lb);
+  });
+  $('#rs-ai-persona').value = r.aiPersona || '';
+  $('#rs-my-persona').value = r.myPersona || '';
+  $('#rs-avatar').value = r.avatar || '';
+  $('#rs-my-avatar').value = r.myAvatar || '';
+  $('#rs-avatar-preview').src = r.avatar || '';
+  $('#rs-my-avatar-preview').src = r.myAvatar || '';
+  $('#rs-avatar').addEventListener('input', e=> $('#rs-avatar-preview').src = e.target.value );
+  $('#rs-my-avatar').addEventListener('input', e=> $('#rs-my-avatar-preview').src = e.target.value );
+  $('#rs-memory').value = r.memory || 12;
+  openModal('modal-role-settings');
+}
+function saveRoleSettings(){
+  const r = state.roles.find(x=>x.id===currentRoleId); if(!r) return;
+  r.remark = $('#rs-remark').value.trim() || r.remark;
+  r.group = $('#rs-group').value || r.group;
+  r.worlds = [...document.querySelectorAll('#rs-worldbooks input:checked')].map(i=>i.value);
+  r.aiPersona = $('#rs-ai-persona').value.trim();
+  r.myPersona = $('#rs-my-persona').value.trim();
+  r.avatar = $('#rs-avatar').value.trim();
+  r.myAvatar = $('#rs-my-avatar').value.trim();
+  r.memory = Math.max(4, Math.min(50, parseInt($('#rs-memory').value||12)));
+  save(); closeModal('modal-role-settings'); renderChatList(); renderContacts(); if(currentRoleId) openChat(currentRoleId);
+}
+
+/* ---------- render & init ---------- */
+function renderAll(){ renderChatList(); renderContacts(); renderMoments(); renderMe(); }
+renderAll(); switchTab('chatlist');
+
+/* wire some remaining UI events */
+$('#wb-title')?.addEventListener('keydown', e=> { if(e.key==='Enter'){ addWorld(); } });
+$('#api-base')?.addEventListener('keydown', e=> { if(e.key==='Enter'){ saveApi(); } });
+
+/* expose some functions to global (for inline onclick) */
+window.switchTab = switchTab;
+window.openManageGroups = openManageGroups;
+window.addGroup = addGroup;
+window.postMoment = postMoment;
+window.clearMoments = clearMoments;
+window.saveApi = saveApi;
+window.testApi = testApi;
+window.addWorld = addWorld;
+window.openNewRoleSheet = openNewRoleSheet;
+window.confirmNewRole = confirmNewRole;
+window.openRoleSettings = function(id){ currentRoleId=id; openRoleSettings(id); };
+window.closeModal = closeModal;
+window.maskClose = maskClose;
+</script>
+</body>
+</html>
